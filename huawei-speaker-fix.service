@@ -1,0 +1,11 @@
+[Unit]
+Description=Route Huawei internal speaker to the speaker DAC
+After=sound.target
+
+[Service]
+ExecStart=/usr/local/bin/huawei-speaker-fix.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
