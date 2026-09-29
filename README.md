@@ -13,8 +13,8 @@ working, on a Huawei laptop that uses Intel SOF audio and a Conexant CX11880 cod
 | Driver | `sof-audio-pci-intel-tgl` + `skl_hda_dsp_generic` |
 | OS | Linux Mint (Ubuntu 24.04 base) |
 
-Other Huawei MateBooks with the same codec layout may need the same fix.
-The node numbers below must match your codec. Check `/proc/asound/card0/codec#0`.
+Other Huawei MateBooks with the same codec may need the same fix. See
+[Other laptops](#other-laptops) before installing on a different model.
 
 ## Symptoms
 
@@ -57,18 +57,40 @@ inside the codec, after all of those stages.
 It runs in a loop, not once at boot. Whenever the codec wakes from runtime power
 saving, the driver restores its own routing, and the service has to set it again.
 
+### Safety checks
+
+Before the service sends any command to the codec, it checks that:
+
+- `hda-verb` and `amixer` are installed.
+- The codec vendor ID is `0x14f11f86` (Conexant CX11880).
+- The subsystem ID is `0x1e83323f`, unless you've allowed other IDs (see
+  [Other laptops](#other-laptops)).
+
+If any check fails, it logs why and exits without touching the codec.
+
+## Requirements
+
+- An Intel laptop using the SOF `sof-hda-dsp` sound card
+- `alsa-tools` (provides `hda-verb`)
+- `alsa-utils` (provides `amixer`)
+- systemd
+
+On apt-based systems, `install.sh` installs any missing packages for you. On other
+distributions, install them yourself first.
+
 ## Install
 
 ```bash
 sudo ./install.sh
 ```
 
-This installs `alsa-tools` if `hda-verb` is missing, then installs:
+The script:
 
-- `/usr/local/bin/huawei-speaker-fix.sh`
-- `/etc/systemd/system/huawei-speaker-fix.service`
-
-It then enables and starts the service.
+1. Checks the codec vendor and subsystem IDs. It stops if they don't match.
+2. Installs `alsa-tools` and `alsa-utils` if they're missing.
+3. Installs `/usr/local/bin/huawei-speaker-fix.sh` and
+   `/etc/systemd/system/huawei-speaker-fix.service`.
+4. Enables and starts the service.
 
 ## Check that it works
 
@@ -80,6 +102,7 @@ It then enables and starts the service.
 
 ```bash
 systemctl status huawei-speaker-fix.service
+journalctl -u huawei-speaker-fix.service
 ```
 
 ## Uninstall
@@ -89,6 +112,33 @@ sudo ./uninstall.sh
 ```
 
 Reboot afterwards so the codec returns to the driver's default routing.
+
+## Other laptops
+
+If your laptop has a Conexant CX11880 codec with a different subsystem ID, use the
+tools in `tools/` to check whether the fix applies before you install it.
+All of them except `codec-info.sh` need root.
+
+| Script | What it does |
+|---|---|
+| `codec-info.sh` | Read-only. Prints the codec IDs, the two output pins, GPIO state and jack state. Your pin `0x16` and pin `0x17` should both list `0x10 0x11` as their connections. |
+| `speaker-route-test.sh` | Routes pin `0x16` to the speaker DAC while music plays. If the speakers get much louder, this fix applies to your laptop. |
+| `headphone-test.sh` | With headphones plugged in, tries three GPIO/EAPD combinations to find the one that makes the headphones play and keeps the speakers silent. |
+| `gpio-test.sh` | Switches on each codec GPIO line in turn, to look for an external speaker amp. None had any effect on the MACHD-WXX9. |
+
+Each test changes codec state only while it runs, and a reboot resets everything.
+The tests pause the service while they run and restart it when they finish.
+
+If the speaker and headphone tests give the same results as on the MACHD-WXX9,
+install with:
+
+```bash
+sudo ./install.sh --force
+```
+
+This writes `ALLOW_ANY_SUBSYSTEM=1` to `/etc/default/huawei-speaker-fix`, so the
+service accepts your subsystem ID. If `headphone-test.sh` reports a different
+combination, edit `huawei-speaker-fix.sh` to match before installing.
 
 ## Troubleshooting
 
@@ -118,8 +168,30 @@ sudo alsactl store
 **Sound is distorted after the fix.** Turn off any EasyEffects gain or EQ preset
 that you set up to compensate for the quiet speakers. You shouldn't need it now.
 
+**The service isn't running.** Check `journalctl -u huawei-speaker-fix.service`.
+It exits on purpose if a safety check fails, and the log says which one.
+
+## Upstream status
+
+This service is a workaround. The proper fix is a quirk for this laptop in the Linux
+kernel's Conexant HDA driver (`sound/pci/hda/patch_conexant.c`). The quirk would
+match the codec subsystem ID `0x1e83323f` and set the same routing and GPIO in the
+driver, so no userspace service would be needed.
+
+No such quirk exists as of September 2026. If you file a report or patch with the
+ALSA developers (alsa-devel mailing list) or the
+[SOF project](https://github.com/thesofproject/linux/issues), attach the output of
+`tools/codec-info.sh` and `alsa-info.sh`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
 ## Credits
 
-The routing diagnosis and verbs are based on
+The routing diagnosis is based on
 [Smoren/huawei-ubuntu-sound-fix](https://github.com/Smoren/huawei-ubuntu-sound-fix),
-written for the Huawei MateBook 14s. I adapted them for this laptop.
+written for the Huawei MateBook 14s. It showed that the speaker follows the headphone
+pin's DAC selection, and how the GPIO and EAPD commands switch between outputs.
+The code in this repository was written separately for this laptop. That repository
+has no license, so none of its code is copied here.

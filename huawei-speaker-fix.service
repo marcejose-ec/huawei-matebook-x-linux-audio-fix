@@ -1,10 +1,11 @@
 [Unit]
-Description=Route Huawei internal speaker to the speaker DAC
+Description=Route Huawei internal speaker and headphone outputs correctly
 After=sound.target
 
 [Service]
+EnvironmentFile=-/etc/default/huawei-speaker-fix
 ExecStart=/usr/local/bin/huawei-speaker-fix.sh
-Restart=always
+Restart=on-failure
 RestartSec=2
 
 [Install]

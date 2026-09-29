@@ -7,9 +7,31 @@
 #               (GPIO1 low enables the headphone output on this board)
 # Re-applied in a loop because codec runtime-PM resume restores the driver's cached state.
 
-card=$(readlink /proc/asound/sofhdadsp) || exit 1
+EXPECTED_VENDOR=0x14f11f86
+EXPECTED_SUBSYSTEM=0x1e83323f
+
+for tool in hda-verb amixer; do
+    command -v "$tool" >/dev/null || { echo "$tool not found (install alsa-tools and alsa-utils)"; exit 0; }
+done
+
+card=$(readlink /proc/asound/sofhdadsp) || { echo "sof-hda-dsp card not found"; exit 1; }
 n=${card#card}
 dev=/dev/snd/hwC${n}D0
+codec=/proc/asound/$card/codec#0
+
+vendor=$(awk '/^Vendor Id:/{print $3}' "$codec")
+subsystem=$(awk '/^Subsystem Id:/{print $3}' "$codec")
+
+# Exit 0 on a hardware mismatch so systemd does not keep restarting the service.
+if [ "$vendor" != "$EXPECTED_VENDOR" ]; then
+    echo "Unsupported codec vendor $vendor (expected $EXPECTED_VENDOR). Not touching the codec."
+    exit 0
+fi
+if [ "$subsystem" != "$EXPECTED_SUBSYSTEM" ] && [ "${ALLOW_ANY_SUBSYSTEM:-0}" != 1 ]; then
+    echo "Untested subsystem $subsystem (expected $EXPECTED_SUBSYSTEM). Set ALLOW_ANY_SUBSYSTEM=1 in /etc/default/huawei-speaker-fix to override."
+    exit 0
+fi
+
 V() { hda-verb "$dev" "$@" >/dev/null 2>&1; }
 
 while true; do
